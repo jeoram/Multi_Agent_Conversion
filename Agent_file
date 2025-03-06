@@ -1,0 +1,246 @@
+import psutil
+import asyncio
+import tkinter as tk
+import os
+import requests
+from tkinter import filedialog, messagebox, ttk
+from langchain_core.messages import HumanMessage
+from langchain_mistralai.chat_models import ChatMistralAI
+import ollama
+import json
+import csv
+import threading
+import time
+import aiofiles
+
+# ======= FILE LOADER AGENT ======= #
+
+class FileLoaderAgent:
+    async def load_file(self, filepath):
+        """Charge un fichier de manière asynchrone."""
+        start_time = time.time()
+
+        try:
+            async with aiofiles.open(filepath, 'r', encoding='utf-8') as file:
+                content = await file.read()
+        except Exception as e:
+            raise ValueError(f"Erreur de chargement du fichier {filepath}: {e}")
+
+        end_time = time.time()
+        print(f"✅ FileLoaderAgent a terminé en {end_time - start_time:.2f} secondes")
+        return content
+
+
+# ======= CODE CONVERSION AGENT ======= #
+
+from concurrent.futures import ThreadPoolExecutor
+
+class CodeConversionAgent:
+    def __init__(self, model_name="codellama:7b"):
+        """Initialise l'agent avec un modèle optimisé pour le code"""
+        self.model_name = model_name
+        self.executor = ThreadPoolExecutor(max_workers=3)
+
+    def convert_code(self, code, source_language, target_language):
+        """Convertit du code source d'un langage à un autre avec Ollama."""
+        start_time = time.time()
+        monitor_performance()
+
+        prompt = (f"Translate the following {source_language} code to {target_language}, ensuring "
+                  "accuracy and preserving functionality. Provide a structured explanation for changes."
+                  f"\n\n{code}")
+
+        future = self.executor.submit(ollama.generate, model=self.model_name, prompt=prompt)
+        response = future.result()
+
+        end_time = time.time()
+        monitor_performance()
+        print(f"✅ CodeConversionAgent a terminé en {end_time - start_time:.2f} secondes")
+
+        return response['response'].strip()
+
+    # ============ Analyseur de performance en Utilisant les ressources ost============#
+
+def monitor_performance():
+    """Affiche l'utilisation du CPU et de la RAM en temps réel."""
+    cpu_usage = psutil.cpu_percent(interval=1)  # Mesure l'utilisation du CPU en 1 seconde
+    memory_info = psutil.virtual_memory()  # Récupère les informations sur la mémoire RAM
+    print(f"🚀 CPU Usage: {cpu_usage}% | RAM Usage: {memory_info.percent}%")
+
+def monitor_continuously(duration=10):
+    """Surveille les performances pendant une durée donnée (en secondes)."""
+    print("🔍 Surveillance des performances en cours...")
+    start_time = time.time()
+    while time.time() - start_time < duration:
+        monitor_performance()
+        time.sleep(1)  # Rafraîchit les valeurs toutes les secondes
+    print("✅ Fin de la surveillance des performances.")
+
+# Exemple d'utilisation :
+if __name__ == "__main__":
+    monitor_continuously(5)  # Surveille les performances pendant 5 secondes
+
+
+
+# ======= DOCUMENTATION AGENT ======= #
+
+class DocumentationAgent:
+    def __init__(self, model_name="open-mistral-7b"):
+        self.api_key = os.getenv("AUAKKHQuAjC47WWCbUg3IuxDkgwn4VJY")
+        self.model_name = ChatMistralAI(model_name="open-mistral-7b", api_key="AUAKKHQuAjC47WWCbUg3IuxDkgwn4VJY")
+
+    def generate_documentation(self, original_code, converted_code):
+        """Generates documentation explaining the conversion process using Mistral LLM."""
+        start_time = time.time()
+
+        prompt = (f"Explain the key transformations, syntax changes, and logic modifications made "
+                  f"when converting the following code:\n\nOriginal Code:\n{original_code}\n\nConverted Code:\n{converted_code}")
+        
+        """Use Mistral AI for generate documentation"""
+        response = self.model_name.invoke([HumanMessage(content=prompt)])
+
+        end_time = time.time()  # Fin du timer
+        print(f"✅ DocumentationAgent a terminé en {end_time - start_time:.2f} secondes")
+        return response.content.strip() if hasattr(response, 'content') else str(response)
+
+# ======= FILE STORAGE AGENT ======= #
+class FileStorageAgent:
+    def save_result(self, original_code, converted_code, target_language, filepath):
+        """Enregistre le code converti dans un fichier avec l'extension correcte."""
+
+        start_time = time.time()
+
+        # Déterminer l'extension du fichier cible en fonction du langage
+        extensions = {
+            "Python": ".py",
+            "JavaScript": ".js",
+            "Java": ".java",
+            "C": ".c",
+            "C++": ".cpp",
+            "HTML": ".html",
+            "CSS": ".css",
+            "PHP": ".php",
+            "Ruby": ".rb",
+        }
+
+        # Obtenir l'extension du langage cible
+        target_extension = extensions.get(target_language, ".txt")  # Par défaut, .txt si inconnu
+
+        # Générer un nom de fichier de sortie
+        base_name, _ = os.path.splitext(filepath)  # Enlève l'extension existante
+        output_filepath = f"{base_name}_converted{target_extension}"
+
+        # Écrire le code converti dans le fichier cible
+        with open(output_filepath, 'w', encoding='utf-8') as file:
+            file.write(converted_code)
+
+        end_time = time.time()
+        print(f"✅ FileStorageAgent a terminé en {end_time - start_time:.2f} secondes")
+        return output_filepath  # Retourne le chemin du fichier créé
+
+
+
+# ======= COORDINATOR AGENT ======= #
+class ConversionCoordinatorAgent:
+    def __init__(self):
+        self.file_loader = FileLoaderAgent()
+        self.code_converter = CodeConversionAgent()
+        self.file_saver = FileStorageAgent()
+
+    async def convert_file(self, filepath, source_language, target_language):
+        """Charge le fichier, convertit le code, et sauvegarde le résultat dans un fichier."""
+
+        total_start = time.time()
+
+        try:
+            # Charger le contenu du fichier
+            file_content = await self.file_loader.load_file(filepath)
+
+            # Convertir le code source en langage cible
+            converted_code = self.code_converter.convert_code(file_content, source_language, target_language)
+
+            # Sauvegarder le code converti avec la bonne extension
+            output_file = self.file_saver.save_result(file_content, converted_code, target_language, filepath)
+
+            total_end = time.time()
+            print(f"🚀 Conversion totale terminée en {total_end - total_start:.2f} secondes")
+            return output_file  # Retourne le chemin du fichier généré
+
+        except Exception as e:
+            raise ValueError(f"Error during conversion: {e}")
+
+# ======= GRAPHICAL USER INTERFACE ======= #
+class CodeConversionApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Code Conversion Tool - Multi-Agent System")
+        self.file_path = ""
+        self.coordinator = ConversionCoordinatorAgent()
+        
+        # UI Components
+        self.file_label = ttk.Label(root, text="Select File:")
+        self.file_label.grid(row=0, column=0, padx=10, pady=10)
+        
+        self.file_entry = ttk.Entry(root, width=50)
+        self.file_entry.grid(row=0, column=1, padx=10, pady=10)
+        
+        self.browse_button = ttk.Button(root, text="Browse", command=self.browse_file)
+        self.browse_button.grid(row=0, column=2, padx=10, pady=10)
+        
+        languages = ["Python", "COBOL", "Java", "C++", "JavaScript", "Ruby", "Go", "C#", "html","CSS"]
+        
+        self.source_label = ttk.Label(root, text="Source Language:")
+        self.source_label.grid(row=1, column=0, padx=10, pady=10)
+        
+        self.source_language = ttk.Combobox(root, values=languages)
+        self.source_language.grid(row=1, column=1, padx=10, pady=10)
+        self.source_language.set("Python")
+        
+        self.target_label = ttk.Label(root, text="Target Language:")
+        self.target_label.grid(row=2, column=0, padx=10, pady=10)
+        
+        self.target_language = ttk.Combobox(root, values=languages)
+        self.target_language.grid(row=2, column=1, padx=10, pady=10)
+        self.target_language.set("COBOL")
+        
+        self.convert_button = ttk.Button(root, text="Convert", command=self.start_conversion_thread)
+        self.convert_button.grid(row=3, column=1, padx=10, pady=10)
+        
+        self.results_text = tk.Text(root, wrap="word", width=100, height=60)
+        self.results_text.grid(row=4, column=0, columnspan=3, padx=10, pady=10)
+    
+    def browse_file(self):
+        filepath = filedialog.askopenfilename(filetypes=[("All Files", ".*")])
+        if filepath:
+            self.file_path = filepath
+            self.file_entry.delete(0, tk.END)
+            self.file_entry.insert(0, filepath)
+    
+    def start_conversion_thread(self):
+        thread = threading.Thread(target=self.convert_code)
+        thread.start()
+
+    def convert_code(self):
+        if not self.file_path:
+            messagebox.showerror("Error", "Please select a file.")
+            return
+    
+        source_language = self.source_language.get()
+        target_language = self.target_language.get()
+
+        async def async_conversion():
+
+            try:
+                output_file = await self.coordinator.convert_file(self.file_path, source_language, target_language)
+                self.root.after(0, lambda: self.results_text.insert(tk.END, f"Conversion saved to: {output_file}\n"))
+            except Exception as e:
+                error_message = f"An error occurred: {e}"
+                self.root.after(0, lambda: messagebox.showerror("Error", error_message))
+
+        threading.Thread(target=lambda : asyncio.run(async_conversion()), daemon=True).start()
+
+# ======= RUN THE APPLICATION ======= #
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = CodeConversionApp(root)
+    root.mainloop()
